@@ -158,6 +158,30 @@ module.exports = class MdsMainMenu
               accelerator: do -> if process.platform == 'darwin' then 'Ctrl+Command+F' else 'F11'
               role: 'togglefullscreen'
             }
+            { type: 'separator' }
+            {
+              label: 'Pre&vious Slide'
+              enabled: @window?
+              accelerator: 'CmdOrCtrl+Up'
+              click: (i, w) => @window.mdsWindow.send 'jumpSlide', false unless @window.mdsWindow.freeze
+            }
+            {
+              label: '&Next Slide'
+              enabled: @window?
+              accelerator: 'CmdOrCtrl+Down'
+              click: (i, w) => @window.mdsWindow.send 'jumpSlide', true unless @window.mdsWindow.freeze
+            }
+            {
+              label: '&Start Presentation'
+              accelerator: 'F12'
+              click: =>
+                @window.mdsWindow.send 'startPresentation'
+            }
+            {
+              label: '&Open notes'
+              click: =>
+                @window.mdsWindow.openNoteWindow()
+            }
           ]
         }
         {
@@ -265,6 +289,13 @@ module.exports = class MdsMainMenu
               type: if @window? then 'radio' else 'normal'
               checked: @states.theme == 'gaia'
               click: => @window.mdsWindow.send 'setTheme', 'gaia' unless @window.mdsWindow.freeze
+            }
+            {
+              label: '&Packt'
+              enabled: @window?
+              type: if @window? then 'radio' else 'normal'
+              checked: @states.theme == 'packt'
+              click: => @window.mdsWindow.send 'setTheme', 'packt' unless @window.mdsWindow.freeze
             }
           ]
 

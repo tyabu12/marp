@@ -1,19 +1,31 @@
 highlightJs  = require 'highlight.js'
+pygmentsJs   = require 'pygments'
 twemoji      = require 'twemoji'
 extend       = require 'extend'
 markdownIt   = require 'markdown-it'
 Path         = require 'path'
 MdsMdSetting = require './mds_md_setting'
 {exist}      = require './mds_file'
+escapeStringRegexp = require 'escape-string-regexp';
+strReplaceAll = require 'str-replace-all'
+jsStringEscape = require 'js-string-escape'
 
 module.exports = class MdsMarkdown
   @slideTagOpen:  (page) -> '<div class="slide_wrapper" id="' + page + '"><div class="slide"><div class="slide_bg"></div><div class="slide_inner">'
   @slideTagClose: (page) -> '</div><footer class="slide_footer"></footer><span class="slide_page" data-page="' + page + '">' + page + '</span></div></div>'
 
+  @dict: {}
   @highlighter: (code, lang) ->
     if lang?
       if lang == 'text' or lang == 'plain'
         return ''
+      else if lang == 'pcpp'
+        if code of MdsMarkdown.dict
+          return MdsMarkdown.dict[code]
+        else
+          res = pygmentsJs.colorizeSync(code, "cpp", 'html').substring(28).slice(0, -13)
+          MdsMarkdown.dict[code] = res
+          return res
       else if highlightJs.getLanguage(lang)
         try
           return highlightJs.highlight(lang, code, true).value
@@ -117,22 +129,79 @@ module.exports = class MdsMarkdown
 
     extend rules,
       emoji: (token, idx) =>
-        twemoji.parse(token[idx].content, @twemojiOpts)
+        if @mustfindrulers == false
+          twemoji.parse(token[idx].content, @twemojiOpts)
 
       hr: (token, idx) =>
-        ruler.push token[idx].map[0] if ruler = @_rulers
-        "#{MdsMarkdown.slideTagClose(ruler.length || '')}#{MdsMarkdown.slideTagOpen(if ruler then ruler.length + 1 else '')}"
+        if @mustfindrulers == true
+          @_rulers.push token[idx].map[0]
+        else
+          ++@lastruler
+          "#{MdsMarkdown.slideTagClose(@lastruler)}#{MdsMarkdown.slideTagOpen(@lastruler + 1)}"
 
       image: (args...) =>
-        @renderers.image.apply(@, args)
-        defaultRenderers.image.apply(@, args)
+        if @mustfindrulers == false
+          @renderers.image.apply(@, args)
+          defaultRenderers.image.apply(@, args)
 
       html_block: (args...) =>
-        @renderers.html_block.apply(@, args)
-        defaultRenderers.html_block.apply(@, args)
+        if @mustfindrulers == false
+          @renderers.html_block.apply(@, args)
+          defaultRenderers.html_block.apply(@, args)
 
   parse: (markdown) =>
-    @_rulers          = []
+    @_rulers = []
+
+    # console.log @_rulers
+
+    # Rendering step to find slide separators
+    @mustfindrulers = true
+    @markdown.render markdown
+    @mustfindrulers = false
+    @lastruler = 0
+
+    final_script  = "const include = require('require-reload')(require);"
+    final_script += '(function() {\nlet out = "";\n'
+
+    line = ''
+    i = 0
+    while i < markdown.length
+      if markdown[i] == '\n'
+        if line.startsWith('@@ ')
+          final_script += "#{line.substr(3, line.length)}\n"
+        else
+          final_script += "out += '#{jsStringEscape line}\\n';\n"
+        line = ''
+      else if markdown.startsWith('@{{', i)
+        for j in [(i)...(markdown.length)]
+          if markdown.startsWith('}}', j)
+            js_value = markdown.substring(i + 3, j)
+            # console.log("js_value: #{js_value}")
+            final_script += "out += #{js_value};\n"
+            i = j + 1
+            break
+      else if markdown.startsWith('@[[', i)
+        for j in [(i)...(markdown.length)]
+          if markdown.startsWith(']]', j)
+            js_value = markdown.substring(i + 3, j)
+            js_value = js_value.replace(/\n/g, "\\n");
+            # console.log("js_value: #{js_value}")
+            final_script += "out += #{js_value};\n"
+            i = j + 1
+            break
+      else
+        line += markdown[i]
+
+      i += 1
+
+    final_script += "out += '#{jsStringEscape line}\\n';\n"
+    line = ''
+
+    final_script += 'return out;\n})();'
+    # console.log(final_script)
+    # console.log(eval(final_script))
+    markdown = eval(final_script)
+
     @_settings        = new MdsMdSetting
     @settingsPosition = []
     @lastParsed       = """
@@ -170,7 +239,7 @@ module.exports = class MdsMarkdown
 
           if parsed
             startFrom += parsed[1].length
-            pageIdx = @_rulers.length || 0
+            pageIdx = @lastruler
 
             if parsed[3] is '$'
               @_settings.setGlobal parsed[4], parsed[5]

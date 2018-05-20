@@ -23,6 +23,7 @@ module.exports = class MdsWindow
     icon:   Path.join(__dirname, '/../../images/marp.png')
 
   browserWindow: null
+  noteWindow: null
   path: null
   changed: false
   freeze: false
@@ -32,6 +33,41 @@ module.exports = class MdsWindow
   _watchingResources: new Set
 
   viewMode: null
+
+  openNoteWindow: =>
+    # console.log("opening")
+    if @noteWindow != null
+      return
+    # console.log("opening 2")
+
+    bw = new BrowserWindow({ width: 800, height: 400 })
+
+    loadCmp = (details) =>
+      setTimeout =>
+        @_watchingResources.delete(details.id)
+        @updateResourceState()
+      , 500
+
+    bw.webContents.session.webRequest.onCompleted loadCmp
+    bw.webContents.session.webRequest.onErrorOccurred loadCmp
+    bw.webContents.session.webRequest.onBeforeRequest (details, callback) =>
+      @_watchingResources.add(details.id)
+      @updateResourceState()
+      callback({})
+
+    bw.loadURL "file://#{__dirname}/../../note.html##{@_window_id}"
+
+    bw.webContents.on 'did-finish-load', =>
+      @_noteWindowLoaded = true
+
+    bw.once 'ready-to-show', => bw.show()
+
+    bw.on 'closed', =>
+      @noteWindow = null
+
+    bw.mdsWindow = @
+    @noteWindow = bw
+    bw
 
   constructor: (fileOpts = {}, @options = {}) ->
     @path = fileOpts?.path || null
@@ -58,6 +94,7 @@ module.exports = class MdsWindow
         window: bw
         development: global.marp.development
         viewMode: @viewMode
+        presentationMode: false
 
       bw.maximize() if global.marp.config.get 'windowPosition.maximized'
 
@@ -95,6 +132,7 @@ module.exports = class MdsWindow
                 MdsWindow.appWillQuit = false
 
       bw.on 'closed', =>
+        @noteWindow?.close()
         @browserWindow = null
         @_setIsOpen false
 
@@ -110,6 +148,7 @@ module.exports = class MdsWindow
       bw.mdsWindow = @
       bw
 
+    @openNoteWindow()
     @_setIsOpen true
 
   @loadFromFile: (fname, mdsWindow, options = {}) ->
@@ -233,9 +272,26 @@ module.exports = class MdsWindow
       @menu.states.theme = theme
       @menu.updateMenu()
 
+    startPresentation: ->
+      @menu.states.presentationMode = true
+      @browserWindow.setFullScreen(true)
+
+    exitPresentation: ->
+      if @menu.states.presentationMode
+        @menu.states.presentationMode = false
+        @browserWindow.setFullScreen(false)
+        @send 'exitPresentation'
+
+    jumpSlide: (forwards) ->
+      if @menu.states.presentationMode
+        @send 'jumpSlide', forwards
+
     unfreeze: ->
       @freeze = false
       @send 'unfreezed'
+
+    slideChangedTo: (n) ->
+      @noteWindow?.webContents.send 'test', n
 
   refreshTitle: =>
     if process.platform == 'darwin'
@@ -249,7 +305,7 @@ module.exports = class MdsWindow
     return '(untitled)' unless @path?
     @path.replace(/\\/g, '/').replace(/.*\//, '')
 
-  getCurrentFile: => 
+  getCurrentFile: =>
     return 'untitled' unless @path?
     @path.replace(/\\/g, '/').replace(/.*\//, '').replace(/\.[^/.]+$/, "")
 
